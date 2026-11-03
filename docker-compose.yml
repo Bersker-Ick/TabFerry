@@ -1,0 +1,11 @@
+services:
+  tabferry:
+    build: .
+    image: tabferry:latest
+    ports:
+      - "8123:8123"
+    environment:
+      TABFERRY_DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
