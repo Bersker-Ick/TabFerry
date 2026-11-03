@@ -1,19 +1,22 @@
-"""HTTP server: serves the app plus a tiny state API."""
+"""HTTP server: serves the app, the state API and live tab updates."""
 
 from __future__ import annotations
 
 import json
 import logging
 import socket
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import List, Optional
-from urllib.parse import urlparse
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 from . import __version__
 from .config import Paths
+from .models import Snapshot, Tab
 from .render import render
-from .snapshot import load as load_snapshot
+from .snapshot import load as load_snapshot, save as save_snapshot
 from .state import StateStore
+from .util import dedupe_key, domain_of, now_iso
 
 log = logging.getLogger(__name__)
 
@@ -21,13 +24,93 @@ MAX_BODY = 256 * 1024
 
 
 class App:
-    """Everything a running TabFerry instance needs."""
+    """Everything a running TabFerry instance needs.
 
-    def __init__(self, paths: Paths):
+    The snapshot can grow at runtime (the watcher appends newly opened tabs),
+    so all reads and writes go through ``_lock`` and the rendered page is
+    regenerated whenever the revision changes.
+    """
+
+    def __init__(self, paths: Paths, allow_empty: bool = False):
         self.paths = paths.ensure()
-        self.snapshot = load_snapshot(paths.tabs_path)
+        self.snapshot = load_snapshot(paths.tabs_path, allow_empty=allow_empty)
         self.state = StateStore(paths.state_path)
-        self.html = render(self.snapshot, self.state.removed())
+        self._lock = threading.RLock()
+        self._revision = 0
+        # (revision, [{u,t,d}, ...]) for tabs discovered by the watcher.
+        self._history: List[Tuple[int, List[Dict[str, str]]]] = []
+        self._html = ""
+        with self._lock:
+            self._render_locked()
+
+    # -- rendering -----------------------------------------------------
+
+    def _render_locked(self) -> None:
+        self._html = render(self.snapshot, self.state.removed(), revision=self._revision)
+
+    def html_bytes(self) -> bytes:
+        with self._lock:
+            return self._html.encode("utf-8")
+
+    def download_html(self) -> str:
+        with self._lock:
+            return render(self.snapshot, self.state.removed(), revision=self._revision)
+
+    # -- reads ---------------------------------------------------------
+
+    def info(self) -> Dict[str, object]:
+        with self._lock:
+            return {
+                "ok": True,
+                "revision": self._revision,
+                "tabs": len(self.snapshot.tabs),
+                "removed": self.state.count(),
+                "updated_at": self.snapshot.updated_at or self.snapshot.created_at,
+            }
+
+    def updates_since(self, since: int) -> Tuple[List[Dict[str, str]], int]:
+        with self._lock:
+            tabs: List[Dict[str, str]] = []
+            for revision, payload in self._history:
+                if revision > since:
+                    tabs.extend(payload)
+            return tabs, self._revision
+
+    # -- live additions ------------------------------------------------
+
+    def add_tabs(self, tabs: List[Tab], mode: str = "normalized") -> List[Tab]:
+        """Append tabs that are new after dedupe and not explicitly removed."""
+        with self._lock:
+            existing = {dedupe_key(tab.url, mode) for tab in self.snapshot.tabs}
+            existing.discard("")
+            added: List[Tab] = []
+            for tab in tabs:
+                key = dedupe_key(tab.url, mode)
+                if not key or key in existing:
+                    continue
+                if self.state.is_removed(tab.url):
+                    continue
+                existing.add(key)
+                self.snapshot.tabs.append(tab)
+                added.append(tab)
+
+            if not added:
+                return []
+
+            self.snapshot.updated_at = now_iso()
+            save_snapshot(self.snapshot, self.paths.tabs_path)
+            self._revision += 1
+            payload = [
+                {"u": tab.url, "t": tab.display_title(), "d": domain_of(tab.url)}
+                for tab in added
+            ]
+            self._history.append((self._revision, payload))
+            if len(self._history) > 200:
+                self._history = self._history[-200:]
+            self._render_locked()
+            return added
+
+    # -- server --------------------------------------------------------
 
     def server(self, host: str, port: int) -> ThreadingHTTPServer:
         httpd = ThreadingHTTPServer((host, port), make_handler(self))
@@ -90,26 +173,35 @@ def make_handler(app: App):
             })
 
         def do_GET(self):  # noqa: N802
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
             if path in ("/", "/index.html", "/app.html"):
-                self._send(200, app.html, "text/html; charset=utf-8")
+                self._send(200, app.html_bytes(), "text/html; charset=utf-8")
                 return
             if path == "/download":
-                body = render(app.snapshot, app.state.removed())
-                self._send(200, body, "text/html; charset=utf-8", {
+                self._send(200, app.download_html(), "text/html; charset=utf-8", {
                     "Content-Disposition": 'attachment; filename="tabferry.html"',
                 })
                 return
             if path == "/api/state":
                 self._json(200, app.state.to_dict())
                 return
+            if path == "/api/version":
+                self._json(200, app.info())
+                return
+            if path == "/api/updates":
+                query = parse_qs(parsed.query)
+                try:
+                    since = int(query.get("since", ["0"])[0])
+                except (TypeError, ValueError):
+                    since = 0
+                tabs, revision = app.updates_since(max(0, since))
+                self._json(200, {"revision": revision, "tabs": tabs})
+                return
             if path == "/health":
-                self._json(200, {
-                    "ok": True,
-                    "version": __version__,
-                    "tabs": len(app.snapshot.tabs),
-                    "removed": app.state.count(),
-                })
+                info = app.info()
+                info["version"] = __version__
+                self._json(200, info)
                 return
             if path == "/favicon.ico":
                 self._send(204, b"", "image/x-icon")

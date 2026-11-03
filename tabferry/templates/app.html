@@ -152,6 +152,7 @@
   var DATA_ID = '__TABFERRY_ID__';
   var TOTAL = DATA.length;
   var DUPES = __TABFERRY_DUPES__;
+  var REVISION = __TABFERRY_REVISION__;
 
   var LANG = (function(){
     var requested = '';
@@ -191,6 +192,7 @@
       exported: 'Exported {n} items',
       imported: 'Imported {n} items',
       badImport: 'That file is not a TabFerry export',
+      newTabs: '{n} new tabs added',
       noDuplicates: 'No duplicates found',
       deduped: 'Merged {n} duplicates',
       confirmDedupe: 'Merge {n} duplicate tabs?',
@@ -225,6 +227,7 @@
       exported: '已导出 {n} 条',
       imported: '已导入 {n} 条',
       badImport: '这个文件不是 TabFerry 导出的',
+      newTabs: '新增 {n} 个标签页',
       noDuplicates: '没有发现重复',
       deduped: '已合并 {n} 个重复',
       confirmDedupe: '合并 {n} 个重复标签页？',
@@ -325,10 +328,7 @@
     drawerEl.setAttribute('aria-label', t('removed'));
   }
 
-  function build(){
-    var fragment = document.createDocumentFragment();
-    for (var i = 0; i < DATA.length; i++){
-      var item = DATA[i];
+  function makeRow(item){
       byUrl.set(item.u, item);
 
       var li = document.createElement('li');
@@ -374,10 +374,40 @@
       li._s = ((item.t || '') + ' ' + item.u + ' ' + (item.d || '')).toLowerCase();
       li._u = item.u;
 
+      return li;
+  }
+
+  function build(){
+    var fragment = document.createDocumentFragment();
+    for (var i = 0; i < DATA.length; i++){
+      var item = DATA[i];
+      var li = makeRow(item);
       liByUrl.set(item.u, li);
       fragment.appendChild(li);
     }
     listEl.appendChild(fragment);
+  }
+
+  function appendTabs(items){
+    var fragment = document.createDocumentFragment();
+    var added = 0;
+    for (var i = 0; i < items.length; i++){
+      var item = items[i];
+      if (!item || !item.u || byUrl.has(item.u)) continue;
+      var li = makeRow(item);
+      liByUrl.set(item.u, li);
+      DATA.push(item);
+      TOTAL++;
+      fragment.appendChild(li);
+      added++;
+    }
+    if (added){
+      listEl.appendChild(fragment);
+      updateCounts();
+      counterSuffixEl.textContent = t('counter', {n: TOTAL});
+      syncVisibility();
+    }
+    return added;
   }
 
   function syncVisibility(){
@@ -694,7 +724,25 @@
     renderDrawer();
   }
 
+  async function pollUpdates(){
+    if (offline || document.hidden) return;
+    try {
+      var response = await fetch('api/updates?since=' + REVISION, {cache: 'no-store'});
+      if (!response.ok) return;
+      var payload = await response.json();
+      if (typeof payload.revision !== 'number') return;
+      if (payload.revision < REVISION){ location.reload(); return; }
+      var added = appendTabs(Array.isArray(payload.tabs) ? payload.tabs : []);
+      REVISION = payload.revision;
+      if (added) toast(t('newTabs', {n: added}), false);
+    } catch (e) { /* transient network error */ }
+  }
+
   init();
+  setInterval(pollUpdates, 8000);
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) pollUpdates();
+  });
 })();
 </script>
 </body>

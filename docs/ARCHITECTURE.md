@@ -27,8 +27,9 @@ TabFerry is a small pipeline: **import → snapshot → render → serve**.
 | `sources/text.py` | One-URL-per-line importer. |
 | `sources/json_source.py` | Snapshot / tab-array importer. |
 | `render.py` | Injects the snapshot and preloaded state into `templates/app.html`. |
-| `server.py` | `ThreadingHTTPServer`, static page, JSON state API, `/download`. |
-| `cli.py` | `import`, `serve`, `export`, `status`, `sources`. |
+| `server.py` | `ThreadingHTTPServer`, page/state APIs, `/download`, live update API. |
+| `watcher.py` | Polls the session store and appends newly opened tabs. |
+| `cli.py` | `import`, `serve`, `export`, `dedupe`, `status`, `sources`. |
 
 ## Data files
 
@@ -38,6 +39,7 @@ TabFerry is a small pipeline: **import → snapshot → render → serve**.
 {
   "version": 1,
   "created_at": "2025-01-02T03:04:05+00:00",
+  "updated_at": "2025-01-02T03:10:00+00:00",
   "source": "firefox",
   "dedupe": "normalized",
   "duplicates_merged": 12,
@@ -100,6 +102,35 @@ files exclusively on Windows, so `_read_session` turns `PermissionError` into a
 the mode and the number of merged tabs on the `Snapshot`; `tabferry dedupe`
 applies the same function to an existing snapshot, and the page shows the count
 in its header.
+
+## Live updates
+
+`tabferry serve --watch` starts a daemon `Watcher` thread. Every
+`--interval` seconds it calls the same source loaders used by `import`,
+then hands the result to `App.add_tabs`:
+
+1. normalise each URL with the configured dedupe mode;
+2. skip URLs already in the snapshot, duplicates inside the batch, and URLs the
+   user explicitly removed (`state.json`);
+3. append the rest, set `updated_at`, save `tabs.json` atomically;
+4. bump `App.revision`, remember `(revision, payload)` in a bounded history, and
+   re-render the page.
+
+The server exposes:
+
+| Route | Returns |
+| --- | --- |
+| `GET /api/version` | `revision`, `tabs`, `removed`, `updated_at` |
+| `GET /api/updates?since=N` | tabs added at revisions greater than `N` |
+
+The page embeds its starting revision and polls `/api/updates` every eight
+seconds, appending new rows in place (and showing a toast). If the server was
+restarted and the revision went backwards, the page reloads instead.
+
+Chromium keeps its session file open exclusively on Windows; the watcher
+converts that to a `SourceError`, logs it once, and retries on the next tick.
+`--source auto` merges Firefox and Chromium results, so a locked Chromium file
+does not stop Firefox tabs from flowing in.
 
 ## Request flow
 

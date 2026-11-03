@@ -60,11 +60,13 @@ class Snapshot:
     version: int = 1
     dedupe: str = "url"
     duplicates_merged: int = 0
+    updated_at: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "version": self.version,
             "created_at": self.created_at,
+            "updated_at": self.updated_at or self.created_at,
             "source": self.source,
             "dedupe": self.dedupe,
             "duplicates_merged": self.duplicates_merged,
@@ -94,4 +96,5 @@ class Snapshot:
             version=int(data.get("version") or 1),
             dedupe=str(data.get("dedupe") or "url"),
             duplicates_merged=max(0, duplicates),
+            updated_at=str(data.get("updated_at") or data.get("created_at") or ""),
         )

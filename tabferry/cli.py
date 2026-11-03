@@ -18,6 +18,7 @@ from .snapshot import SnapshotError, load as load_snapshot, save as save_snapsho
 from .sources import BROWSERS, SOURCES, SourceError, get_source, load_chromium, load_firefox
 from .state import StateStore
 from .util import dedupe_tabs, now_iso
+from .watcher import Watcher
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +51,18 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8123, help="port (default: 8123)")
     serve.add_argument("--data-dir", help="data directory (default: per-user app data)")
     serve.add_argument("--open", action="store_true", help="open the page in the local browser")
+    serve.add_argument("--watch", action="store_true",
+                       help="poll the browser session and append newly opened tabs")
+    serve.add_argument("--interval", type=float, default=5.0,
+                       help="watch interval in seconds (default: 5)")
+    serve.add_argument("--source", choices=["auto", "firefox", "chromium"], default="auto",
+                       help="source to watch (default: auto: Firefox + Chromium)")
+    serve.add_argument("--profile",
+                       help="browser profile directory or session file (default: auto-detect)")
+    serve.add_argument("--browser", choices=["auto"] + sorted(BROWSERS), default="auto",
+                       help="Chromium-family browser to watch (default: auto)")
+    serve.add_argument("--dedupe", choices=["none", "url", "normalized"], default="normalized",
+                       help="dedupe strategy for tabs found by the watcher")
     serve.set_defaults(func=cmd_serve)
 
     exp = sub.add_parser("export", help="export the snapshot")
@@ -103,6 +116,7 @@ def cmd_import(args: argparse.Namespace) -> int:
     snapshot = Snapshot(
         tabs=tabs,
         created_at=now_iso(),
+        updated_at=now_iso(),
         source=label,
         dedupe=mode,
         duplicates_merged=merged,
@@ -115,14 +129,54 @@ def cmd_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def _make_watch_loader(args: argparse.Namespace):
+    """Return a callable that loads tabs from the configured source(s)."""
+
+    def load() -> List:
+        if args.source == "firefox":
+            return load_firefox(args.profile)
+        if args.source == "chromium":
+            return load_chromium(args.browser, args.profile)
+
+        tabs: List = []
+        errors: List[str] = []
+        loaders = (
+            lambda: load_firefox(args.profile),
+            lambda: load_chromium(args.browser, args.profile),
+        )
+        for loader in loaders:
+            try:
+                tabs.extend(loader())
+            except SourceError as exc:
+                errors.append(str(exc))
+        if not tabs and errors:
+            raise SourceError("; ".join(errors[:2]))
+        return tabs
+
+    return load
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     paths = resolve_paths(args.data_dir)
     if not paths.tabs_path.is_file():
-        print("No snapshot found. Run `tabferry import` first.", file=sys.stderr)
-        return 1
+        if not args.watch:
+            print("No snapshot found. Run `tabferry import` first.", file=sys.stderr)
+            return 1
+        created = now_iso()
+        save_snapshot(
+            Snapshot(
+                tabs=[],
+                created_at=created,
+                updated_at=created,
+                source="watch",
+                dedupe=args.dedupe,
+            ),
+            paths.tabs_path,
+        )
+        print("No snapshot yet; starting empty and watching for tabs.")
 
     try:
-        app = App(paths)
+        app = App(paths, allow_empty=args.watch)
     except (SnapshotError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -134,6 +188,19 @@ def cmd_serve(args: argparse.Namespace) -> int:
           f"{app.state.count()} removed")
     for url in urls:
         print(f"  {url}")
+
+    watcher = None
+    if args.watch:
+        watcher = Watcher(
+            app,
+            _make_watch_loader(args),
+            interval=args.interval,
+            mode=args.dedupe,
+        )
+        watcher.start()
+        print(f"Watching {args.source} every {args.interval:g}s "
+              f"(dedupe: {args.dedupe})")
+
     print("Press Ctrl+C to stop.")
     if args.open and urls:
         webbrowser.open(urls[-1])
@@ -142,6 +209,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print("\nStopping.")
     finally:
+        if watcher is not None:
+            watcher.stop()
         httpd.server_close()
     return 0
 
@@ -186,6 +255,7 @@ def cmd_dedupe(args: argparse.Namespace) -> int:
     merged = before - len(snapshot.tabs)
     snapshot.dedupe = args.mode
     snapshot.duplicates_merged += merged
+    snapshot.updated_at = now_iso()
     save_snapshot(snapshot, paths.tabs_path)
     print(f"Merged {merged} duplicate tabs; {len(snapshot.tabs)} remain (mode {args.mode})")
     return 0
@@ -201,6 +271,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     state = StateStore(paths.state_path)
     print(f"Data dir: {paths.data_dir}")
     print(f"Created:  {snapshot.created_at}")
+    print(f"Updated:  {snapshot.updated_at or snapshot.created_at}")
     print(f"Source:   {snapshot.source}")
     print(f"Tabs:     {len(snapshot.tabs)}")
     print(f"Dedupe:   {snapshot.dedupe} ({snapshot.duplicates_merged} merged)")

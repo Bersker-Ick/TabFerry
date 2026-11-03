@@ -20,6 +20,8 @@ Browser session  ──import──▶  tabs.json  ──serve──▶  phone (
 
 - **One-command import** — Firefox session stores and Chromium-family session
   files (Chrome, Edge, Brave, Chromium), plus plain text and JSON.
+- **Live watch** — `serve --watch` polls the browser session and appends newly
+  opened tabs, deduplicating as it goes.
 - **Mobile-first page** — search, tap a title to open, tap `×` to remove.
 - **English / 简体中文 UI** — picked from the browser language; override with
   `?lang=zh` or `?lang=en`.
@@ -114,10 +116,33 @@ tabferry serve --port 9000
 tabferry serve --open              # also open the local browser
 ```
 
+### Live mode
+
+```bash
+tabferry serve --watch                    # poll every 5s, dedupe normalized
+tabferry serve --watch --interval 10
+tabferry serve --watch --source firefox
+tabferry serve --watch --source chromium --browser edge
+```
+
+While watching, TabFerry polls the session store, appends tabs it has not seen
+(normalized dedupe by default), keeps tabs you removed removed, and bumps a
+revision. The page asks `GET /api/updates?since=<revision>` every 8 seconds and
+appends new rows without a reload.
+
+- Firefox updates `sessionstore-backups/recovery.jsonlz4` while it runs, so new
+  tabs appear within one interval.
+- Chromium may hold `Sessions/Session_*` exclusively on Windows; the watcher
+  logs a warning and retries instead of crashing. Close the browser, or import
+  from a copied profile.
+- `--source auto` (default) merges Firefox and Chromium.
+
 | Route | Purpose |
 | --- | --- |
 | `GET /` | the mobile app |
 | `GET /api/state` | removed URLs |
+| `GET /api/version` | revision, tab and removed counts |
+| `GET /api/updates?since=N` | tabs added after revision N |
 | `POST /api/remove` | body `{"url": "..."}` |
 | `POST /api/restore` | body `{"url": "..."}` |
 | `POST /api/restore_all` | clear removed state |
@@ -160,7 +185,7 @@ Per-user data directory:
 Override with `--data-dir` or `TABFERRY_DATA_DIR`. Two files live there:
 
 ```
-tabs.json    snapshot: tabs, created_at, source
+tabs.json    snapshot: tabs, created_at, updated_at, source
 state.json   removed URLs with timestamps
 ```
 
@@ -261,7 +286,8 @@ tabferry/
   util.py         URL normalization, dedupe, atomic writes
   mozlz4.py       pure-Python mozLz40/LZ4 decompressor
   render.py       template + data -> single-file app
-  server.py       HTTP server + JSON API
+  server.py       HTTP server, state API and live update API
+  watcher.py      polls the browser session and appends new tabs
   sources/        chromium.py, firefox.py, text.py, json_source.py
   templates/      app.html (English + 简体中文)
 tests/            unittest suite, no third-party deps

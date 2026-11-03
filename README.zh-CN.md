@@ -18,6 +18,8 @@ TabFerry 读取桌面浏览器里已经打开的标签页，生成一个单文�
 
 - **一条命令导入** —— 支持 Firefox 会话存储、Chromium 系（Chrome / Edge /
   Brave / Chromium）的 SNSS 会话文件，也支持纯文本和 JSON。
+- **实时监听** —— `serve --watch` 轮询浏览器会话，自动把新打开的标签页加进
+  列表，并顺手去重。
 - **移动端优先的页面** —— 搜索、点标题打开、点 `×` 移除。
 - **中英文界面** —— 根据浏览器语言自动选择，也可用 `?lang=zh` / `?lang=en`
   强制指定。
@@ -110,10 +112,31 @@ tabferry serve --port 9000
 tabferry serve --open              # 同时打开本机浏览器
 ```
 
+### 实时监听
+
+```bash
+tabferry serve --watch                    # 每 5 秒轮询，normalized 去重
+tabferry serve --watch --interval 10
+tabferry serve --watch --source firefox
+tabferry serve --watch --source chromium --browser edge
+```
+
+监听模式下 TabFerry 会轮询会话文件，把没见过的标签页追加进来（默认按
+`normalized` 去重），已经手动移除的不会复活，同时递增 revision。页面每 8 秒
+请求 `GET /api/updates?since=<revision>`，把新行直接追加到列表，不用刷新。
+
+- Firefox 运行时会持续写 `sessionstore-backups/recovery.jsonlz4`，所以新标签页
+  通常在一个轮询周期内出现。
+- Windows 上 Chromium 可能独占 `Sessions/Session_*`，监听器只会记一条警告并
+  重试，不会崩；关掉浏览器，或用复制出来的 profile 导入。
+- `--source auto`（默认）会同时合并 Firefox 和 Chromium。
+
 | 路由 | 用途 |
 | --- | --- |
 | `GET /` | 手机页面 |
 | `GET /api/state` | 已移除的 URL |
+| `GET /api/version` | revision、标签页数和已移除数 |
+| `GET /api/updates?since=N` | revision N 之后新增的标签页 |
 | `POST /api/remove` | 请求体 `{"url": "..."}` |
 | `POST /api/restore` | 请求体 `{"url": "..."}` |
 | `POST /api/restore_all` | 清空已移除 |
@@ -154,7 +177,7 @@ Removed:  3
 可以用 `--data-dir` 或 `TABFERRY_DATA_DIR` 覆盖。目录里有两个文件：
 
 ```
-tabs.json    快照：标签页、创建时间、来源
+tabs.json    快照：标签页、创建时间、更新时间、来源
 state.json   已移除的 URL 及时间
 ```
 
@@ -247,7 +270,8 @@ tabferry/
   util.py         URL 归一化、去重、原子写入
   mozlz4.py       纯 Python mozLz40/LZ4 解压
   render.py       模板 + 数据 -> 单文件页面
-  server.py       HTTP 服务 + JSON API
+  server.py       HTTP 服务、状态 API 和实时更新 API
+  watcher.py      轮询浏览器会话并追加新标签页
   sources/        chromium.py、firefox.py、text.py、json_source.py
   templates/      app.html（英文 + 简体中文）
 tests/            unittest，无第三方依赖

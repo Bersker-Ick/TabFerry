@@ -29,6 +29,7 @@ def render(
     snapshot: Snapshot,
     removed: Optional[Iterable[str]] = None,
     title: str = "TabFerry",
+    revision: int = 0,
 ) -> str:
     """Return the complete HTML app for ``snapshot``.
 
@@ -53,6 +54,7 @@ def render(
         PRELOADED_TOKEN: preloaded,
         "__TABFERRY_TOTAL__": str(len(data)),
         "__TABFERRY_DUPES__": str(snapshot.duplicates_merged),
+        "__TABFERRY_REVISION__": str(revision),
         "__TABFERRY_ID__": data_id,
         "__TABFERRY_GENERATED__": html.escape(snapshot.created_at or "unknown"),
         "__TABFERRY_SOURCE__": html.escape(snapshot.source or "unknown"),

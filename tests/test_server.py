@@ -84,6 +84,24 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(body["changed"])
         self.assertEqual(body["removed"], 0)
 
+    def test_live_updates(self):
+        added = self.app.add_tabs([Tab(url="https://new.example/", title="New")])
+        self.assertEqual(len(added), 1)
+
+        with self.get("/api/version") as response:
+            info = json.loads(response.read())
+        self.assertEqual(info["revision"], 1)
+        self.assertEqual(info["tabs"], 3)
+
+        with self.get("/api/updates?since=0") as response:
+            updates = json.loads(response.read())
+        self.assertEqual(updates["revision"], 1)
+        self.assertEqual([item["u"] for item in updates["tabs"]], ["https://new.example/"])
+
+        with self.get("/api/updates?since=1") as response:
+            empty = json.loads(response.read())
+        self.assertEqual(empty["tabs"], [])
+
     def test_download_is_attachment_with_state(self):
         self.post("/api/remove", {"url": "https://beta.example/"}).read()
         with self.get("/download") as response:
