@@ -22,19 +22,22 @@
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body{ margin:0; padding:0; background:var(--bg); color:var(--fg); }
   body{ font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
-        "Microsoft YaHei",sans-serif; padding-bottom:env(safe-area-inset-bottom); }
+        "Microsoft YaHei",sans-serif; padding-bottom:env(safe-area-inset-bottom);
+        overflow-x:hidden; }
   [hidden]{ display:none !important; }
   .hdr{ position:sticky; top:0; z-index:20; background:var(--bg);
         border-bottom:1px solid var(--line); padding:10px 14px 8px;
         padding-top:calc(10px + env(safe-area-inset-top)); }
   .row1{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .row1 > div:first-child{ min-width:0; }
   h1{ font-size:16px; margin:0; font-weight:650; letter-spacing:.1px; }
-  .sub{ font-size:11px; color:var(--muted); margin-top:2px; }
+  .sub{ font-size:11px; color:var(--muted); margin-top:2px; overflow-wrap:anywhere; }
   .counter{ font-variant-numeric:tabular-nums; color:var(--muted); font-size:11px;
-            text-align:right; line-height:1.2; }
+            text-align:right; line-height:1.2; flex:0 0 auto; }
   .counter b{ display:block; font-size:19px; color:var(--fg); }
   .row2{ display:flex; gap:8px; margin-top:9px; }
-  #q{ flex:1; min-width:0; padding:9px 12px; border:1px solid var(--line);
+  .row2 > .btn{ flex:0 0 auto; }
+  #q{ flex:1 1 0; min-width:0; padding:9px 12px; border:1px solid var(--line);
       background:var(--card); color:var(--fg); border-radius:11px; font-size:15px;
       outline:none; }
   #q:focus{ border-color:var(--accent); }
