@@ -38,8 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
     imp.add_argument("--from", dest="from_path", metavar="PATH",
                      help="input file for --source text or json")
     imp.add_argument("--data-dir", help="data directory (default: per-user app data)")
+    imp.add_argument("--dedupe", choices=["none", "url", "normalized"], default="normalized",
+                     help="duplicate handling: none, url (ignore #fragment), "
+                          "normalized (also tracking params, www, ports; default)")
     imp.add_argument("--keep-duplicates", action="store_true",
-                     help="keep tabs whose URL differs only by #fragment")
+                     help="alias for --dedupe none")
     imp.set_defaults(func=cmd_import)
 
     serve = sub.add_parser("serve", help="serve the mobile page")
@@ -54,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     exp.add_argument("--output", "-o", help="write to this file (default: stdout)")
     exp.add_argument("--data-dir", help="data directory (default: per-user app data)")
     exp.set_defaults(func=cmd_export)
+
+    dedupe = sub.add_parser("dedupe", help="merge duplicate tabs in the snapshot")
+    dedupe.add_argument("--mode", choices=["none", "url", "normalized"], default="normalized",
+                        help="duplicate handling (default: normalized)")
+    dedupe.add_argument("--data-dir", help="data directory (default: per-user app data)")
+    dedupe.set_defaults(func=cmd_dedupe)
 
     status = sub.add_parser("status", help="show the current snapshot")
     status.add_argument("--data-dir", help="data directory (default: per-user app data)")
@@ -84,16 +93,23 @@ def cmd_import(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    mode = "none" if args.keep_duplicates else args.dedupe
     raw_count = len(tabs)
-    if not args.keep_duplicates:
-        tabs = dedupe_tabs(tabs)
+    merged = 0
+    if mode != "none":
+        tabs = dedupe_tabs(tabs, mode=mode)
+        merged = raw_count - len(tabs)
 
-    snapshot = Snapshot(tabs=tabs, created_at=now_iso(), source=label)
+    snapshot = Snapshot(
+        tabs=tabs,
+        created_at=now_iso(),
+        source=label,
+        dedupe=mode,
+        duplicates_merged=merged,
+    )
     save_snapshot(snapshot, paths.tabs_path)
 
-    suffix = ""
-    if raw_count != len(tabs):
-        suffix = f" ({raw_count - len(tabs)} duplicates merged)"
+    suffix = f" ({merged} duplicates merged)" if merged else ""
     print(f"Imported {len(tabs)} tabs from {label}{suffix}")
     print(f"Snapshot: {paths.tabs_path}")
     return 0
@@ -156,6 +172,25 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dedupe(args: argparse.Namespace) -> int:
+    paths = resolve_paths(args.data_dir)
+    try:
+        snapshot = load_snapshot(paths.tabs_path)
+    except SnapshotError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    before = len(snapshot.tabs)
+    if args.mode != "none":
+        snapshot.tabs = dedupe_tabs(snapshot.tabs, mode=args.mode)
+    merged = before - len(snapshot.tabs)
+    snapshot.dedupe = args.mode
+    snapshot.duplicates_merged += merged
+    save_snapshot(snapshot, paths.tabs_path)
+    print(f"Merged {merged} duplicate tabs; {len(snapshot.tabs)} remain (mode {args.mode})")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     paths = resolve_paths(args.data_dir)
     try:
@@ -168,6 +203,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Created:  {snapshot.created_at}")
     print(f"Source:   {snapshot.source}")
     print(f"Tabs:     {len(snapshot.tabs)}")
+    print(f"Dedupe:   {snapshot.dedupe} ({snapshot.duplicates_merged} merged)")
     print(f"Removed:  {state.count()}")
     return 0
 

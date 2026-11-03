@@ -52,6 +52,7 @@ def render(
         DATA_TOKEN: payload,
         PRELOADED_TOKEN: preloaded,
         "__TABFERRY_TOTAL__": str(len(data)),
+        "__TABFERRY_DUPES__": str(snapshot.duplicates_merged),
         "__TABFERRY_ID__": data_id,
         "__TABFERRY_GENERATED__": html.escape(snapshot.created_at or "unknown"),
         "__TABFERRY_SOURCE__": html.escape(snapshot.source or "unknown"),

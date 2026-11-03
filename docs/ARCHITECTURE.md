@@ -20,6 +20,7 @@ TabFerry is a small pipeline: **import → snapshot → render → serve**.
 | `models.py` | `Tab` (url, title, window, pinned, source) and `Snapshot`. |
 | `snapshot.py` | Load/save the imported tab list, with friendly errors. |
 | `state.py` | Thread-safe removed-URL set, atomic JSON writes. |
+| `util.py` | URL normalization, dedupe keys, atomic writes, time helpers. |
 | `mozlz4.py` | Decoder for Firefox's `mozLz40` LZ4 container. |
 | `sources/firefox.py` | Firefox session store and `profiles.ini` discovery. |
 | `sources/chromium.py` | SNSS parser for Chrome, Edge, Brave and Chromium. |
@@ -38,6 +39,8 @@ TabFerry is a small pipeline: **import → snapshot → render → serve**.
   "version": 1,
   "created_at": "2025-01-02T03:04:05+00:00",
   "source": "firefox",
+  "dedupe": "normalized",
+  "duplicates_merged": 12,
   "tabs": [{"url": "https://example.com/", "title": "Example", "window": 1,
             "pinned": false, "source": "firefox"}]
 }
@@ -83,10 +86,25 @@ list and is only used when no `Session_*` exists. Browsers often hold these
 files exclusively on Windows, so `_read_session` turns `PermissionError` into a
 `SourceError` with an actionable message.
 
+## Deduplication
+
+`util.dedupe_key(url, mode)` defines what counts as the same tab:
+
+| Mode | Key |
+| --- | --- |
+| `normalized` (default) | `normalize_url`: lowercase scheme/host, no `www.`, no default port, no fragment, no tracking params (`utm_*`, `fbclid`, `gclid`, `ref`, `spm`, …), no trailing slash, sorted query params |
+| `url` | everything before `#` |
+| `none` | the full URL, so nothing is merged |
+
+`dedupe_tabs(tabs, mode=...)` keeps the first occurrence. The importer stores
+the mode and the number of merged tabs on the `Snapshot`; `tabferry dedupe`
+applies the same function to an existing snapshot, and the page shows the count
+in its header.
+
 ## Request flow
 
-1. `tabferry import` picks a source, normalises tabs, deduplicates by URL
-   (ignoring `#fragment`) and writes `tabs.json`.
+1. `tabferry import` picks a source, normalises tabs, applies the configured
+   dedupe mode (see below) and writes `tabs.json`.
 2. `tabferry serve` loads the snapshot and state, renders the page once into
    memory, and starts a threaded HTTP server.
 3. The page loads with the tab list embedded. It calls `GET /api/state` and

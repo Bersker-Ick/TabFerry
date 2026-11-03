@@ -58,12 +58,16 @@ class Snapshot:
     created_at: str
     source: str
     version: int = 1
+    dedupe: str = "url"
+    duplicates_merged: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "version": self.version,
             "created_at": self.created_at,
             "source": self.source,
+            "dedupe": self.dedupe,
+            "duplicates_merged": self.duplicates_merged,
             "tabs": [tab.to_dict() for tab in self.tabs],
         }
 
@@ -79,9 +83,15 @@ class Snapshot:
             tab = Tab.from_dict(item)
             if tab.url:
                 tabs.append(tab)
+        try:
+            duplicates = int(data.get("duplicates_merged") or 0)
+        except (TypeError, ValueError):
+            duplicates = 0
         return cls(
             tabs=tabs,
             created_at=str(data.get("created_at") or ""),
             source=str(data.get("source") or "unknown"),
             version=int(data.get("version") or 1),
+            dedupe=str(data.get("dedupe") or "url"),
+            duplicates_merged=max(0, duplicates),
         )

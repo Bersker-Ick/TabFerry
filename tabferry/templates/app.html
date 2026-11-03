@@ -96,7 +96,7 @@
   <div class="row1">
     <div>
       <h1>TabFerry</h1>
-      <div class="sub">__TABFERRY_GENERATED__ · __TABFERRY_SOURCE__</div>
+      <div class="sub"><span>__TABFERRY_GENERATED__ · __TABFERRY_SOURCE__</span><span id="dedupeNote"></span></div>
     </div>
     <div class="counter"><b id="remain">__TABFERRY_TOTAL__</b><span id="counterSuffix"></span></div>
   </div>
@@ -128,6 +128,7 @@
   </div>
   <div id="drawerList" class="drawer-list"></div>
   <div class="drawer-f">
+    <button id="dedupeBtn" class="btn small" type="button">Dedupe</button>
     <button id="exportBtn" class="btn small" type="button">Export</button>
     <button id="importBtn" class="btn small" type="button">Import</button>
     <input id="importFile" type="file" accept=".json,application/json" hidden>
@@ -147,6 +148,7 @@
   var PRELOADED = /*__TABFERRY_PRELOADED__*/[];
   var DATA_ID = '__TABFERRY_ID__';
   var TOTAL = DATA.length;
+  var DUPES = __TABFERRY_DUPES__;
 
   var LANG = (function(){
     var requested = '';
@@ -173,17 +175,22 @@
       close: 'Close',
       export: 'Export',
       import: 'Import',
+      dedupe: 'Dedupe',
       restore: 'Restore',
       removeAria: 'Remove from list',
       nothingRemoved: 'Nothing removed yet',
       noMatches: 'No matches',
       allTriaged: 'Everything is triaged. Removed tabs can be restored from the drawer.',
+      dupes: '{n} duplicates merged',
       removedOne: 'Removed 1 tab',
       restored: 'Restored',
       allRestored: 'All restored',
       exported: 'Exported {n} items',
       imported: 'Imported {n} items',
       badImport: 'That file is not a TabFerry export',
+      noDuplicates: 'No duplicates found',
+      deduped: 'Merged {n} duplicates',
+      confirmDedupe: 'Merge {n} duplicate tabs?',
       confirmRestore: 'Restore all {n} removed tabs?'
     },
     zh: {
@@ -202,17 +209,22 @@
       close: '关闭',
       export: '导出',
       import: '导入',
+      dedupe: '去重',
       restore: '恢复',
       removeAria: '从列表移除',
       nothingRemoved: '还没有移除任何标签页',
       noMatches: '没有匹配的链接',
       allTriaged: '全部处理完了，可在「已移除」里恢复',
+      dupes: '合并了 {n} 个重复',
       removedOne: '已移除 1 个标签页',
       restored: '已恢复',
       allRestored: '已全部恢复',
       exported: '已导出 {n} 条',
       imported: '已导入 {n} 条',
       badImport: '这个文件不是 TabFerry 导出的',
+      noDuplicates: '没有发现重复',
+      deduped: '已合并 {n} 个重复',
+      confirmDedupe: '合并 {n} 个重复标签页？',
       confirmRestore: '恢复全部 {n} 个已移除的标签页？'
     }
   };
@@ -248,6 +260,7 @@
   var syncTextEl = $('#syncText');
   var emptyEl = $('#empty');
   var downloadLink = $('#downloadLink');
+  var dedupeNoteEl = $('#dedupeNote');
 
   var byUrl = new Map();
   var liByUrl = new Map();
@@ -257,6 +270,13 @@
   var toastTimer = null;
   var query = '';
   var LS_KEY = 'tabferry:' + DATA_ID + ':removed';
+  var TRACKING = {
+    fbclid: 1, gclid: 1, yclid: 1, mc_cid: 1, mc_eid: 1, igshid: 1,
+    mkt_tok: 1, _ga: 1, _gl: 1, ref: 1, ref_src: 1, ref_url: 1,
+    spm: 1, scm: 1, share_source: 1, share_medium: 1, share_plat: 1,
+    share_tag: 1, share_session_id: 1, from_source: 1, from_spmid: 1,
+    vd_source: 1
+  };
 
   function lsLoad(){
     try {
@@ -293,9 +313,11 @@
     $('#closeDrawer').textContent = t('close');
     $('#exportBtn').textContent = t('export');
     $('#importBtn').textContent = t('import');
+    $('#dedupeBtn').textContent = t('dedupe');
     undoEl.textContent = t('undo');
     downloadLink.textContent = t('saveOffline');
     counterSuffixEl.textContent = t('counter', {n: TOTAL});
+    dedupeNoteEl.textContent = DUPES > 0 ? ' · ' + t('dupes', {n: DUPES}) : '';
     syncTextEl.textContent = t('connecting');
     drawerEl.setAttribute('aria-label', t('removed'));
   }
@@ -538,6 +560,67 @@
     reader.readAsText(file);
   }
 
+  function normalizedKey(raw){
+    try {
+      var parsed = new URL(raw);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:'){
+        return raw.split('#')[0];
+      }
+      var host = parsed.hostname.toLowerCase();
+      if (host.indexOf('www.') === 0) host = host.slice(4);
+      var port = parsed.port;
+      if ((parsed.protocol === 'http:' && port === '80') ||
+          (parsed.protocol === 'https:' && port === '443')){
+        port = '';
+      }
+      var path = parsed.pathname || '/';
+      if (path.length > 1 && path.charAt(path.length - 1) === '/'){
+        path = path.replace(/\/+$/, '');
+      }
+      var pairs = [];
+      parsed.searchParams.forEach(function(value, key){
+        var lowered = key.toLowerCase();
+        if (lowered.indexOf('utm_') === 0 || TRACKING[lowered]) return;
+        pairs.push([key, value]);
+      });
+      pairs.sort(function(a, b){
+        return a[0] < b[0] ? -1 : (a[0] > b[0] ? 1 : 0);
+      });
+      var query = pairs.map(function(pair){
+        return encodeURIComponent(pair[0]) + '=' + encodeURIComponent(pair[1]);
+      }).join('&');
+      return parsed.protocol + '//' + host + (port ? ':' + port : '') + path +
+             (query ? '?' + query : '');
+    } catch (e) {
+      return raw.split('#')[0];
+    }
+  }
+
+  function dedupeList(){
+    var seen = {};
+    var extras = [];
+    for (var i = 0; i < DATA.length; i++){
+      var url = DATA[i].u;
+      if (removed.has(url)) continue;
+      var key = normalizedKey(url);
+      if (seen[key]) extras.push(url);
+      else seen[key] = true;
+    }
+    if (!extras.length){
+      toast(t('noDuplicates'), false);
+      return;
+    }
+    if (!confirm(t('confirmDedupe', {n: extras.length}))) return;
+    for (var j = 0; j < extras.length; j++){
+      removed.add(extras[j]);
+      push('remove', extras[j]);
+    }
+    updateCounts();
+    renderDrawer();
+    syncVisibility();
+    toast(t('deduped', {n: extras.length}), false);
+  }
+
   qEl.addEventListener('input', function(){ query = qEl.value; syncVisibility(); });
   $('#openRemoved').addEventListener('click', openDrawer);
   $('#closeDrawer').addEventListener('click', closeDrawer);
@@ -558,6 +641,7 @@
     toast(t('allRestored'), false);
   });
   $('#exportBtn').addEventListener('click', exportState);
+  $('#dedupeBtn').addEventListener('click', dedupeList);
   $('#importBtn').addEventListener('click', function(){ $('#importFile').click(); });
   $('#importFile').addEventListener('change', function(){
     var file = this.files && this.files[0];

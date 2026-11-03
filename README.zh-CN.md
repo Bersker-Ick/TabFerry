@@ -65,7 +65,8 @@ tabferry import --source chromium --browser edge
 tabferry import --source chromium --profile "C:\Users\me\AppData\Local\Google\Chrome\User Data\Default"
 tabferry import --source text --from urls.txt
 tabferry import --source json --from tabs.json
-tabferry import --keep-duplicates
+tabferry import --dedupe url                        # 只忽略 #锚点
+tabferry import --dedupe none                       # 全部保留
 ```
 
 - **Firefox** —— 读取 `sessionstore.jsonlz4`（以及
@@ -77,7 +78,29 @@ tabferry import --keep-duplicates
 - **文本** —— 一行一个 URL，或 `标题<TAB>URL`。
 - **JSON** —— TabFerry 快照，或 `{"url": "...", "title": "..."}` 数组。
 
-默认会合并重复页面（URL 相同、只有 `#锚点` 不同）。
+默认使用 `normalized` 策略去重；见下文。
+
+### 去重
+
+导入时默认去重，策略如下：
+
+| `--dedupe` | 合并规则 |
+| --- | --- |
+| `normalized`（默认） | 同一个页面：忽略 `#锚点`、`utm_*` / `fbclid` / `gclid` 等跟踪参数、`www.`、默认端口、末尾斜杠，以及查询参数顺序 |
+| `url` | 只忽略 `#锚点` |
+| `none` | 不去重（`--keep-duplicates` 是它的别名） |
+
+不想重新导入、只想去重已有快照：
+
+```bash
+tabferry dedupe --mode normalized
+```
+
+快照里会记录去重策略和合并数量；页面顶部会显示"合并了 N 个重复"，
+`tabferry status` 也会打印。
+
+页面「已移除」抽屉里的 **去重** 按钮会对当前列表应用同样的归一化比较，
+被合并的条目会进入「已移除」，可以单独恢复。
 
 ### 提供服务
 
@@ -116,6 +139,7 @@ Data dir: /home/me/.local/share/tabferry
 Created:  2025-01-02T03:04:05+00:00
 Source:   chromium:edge
 Tabs:     128
+Dedupe:   normalized (12 merged)
 Removed:  3
 ```
 
@@ -217,6 +241,7 @@ tabferry/
   models.py       Tab、Snapshot
   snapshot.py     快照读写
   state.py        已移除集合（原子 JSON）
+  util.py         URL 归一化、去重、原子写入
   mozlz4.py       纯 Python mozLz40/LZ4 解压
   render.py       模板 + 数据 -> 单文件页面
   server.py       HTTP 服务 + JSON API

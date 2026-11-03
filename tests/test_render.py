@@ -24,7 +24,8 @@ class RenderTests(unittest.TestCase):
         self.assertIn("https://beta.example/path?a=1&b=2", html)
         self.assertIn("var PRELOADED =", html)
         for token in ("__TABFERRY_DATA__", "__TABFERRY_PRELOADED__", "__TABFERRY_TOTAL__",
-                      "__TABFERRY_ID__", "__TABFERRY_GENERATED__", "__TABFERRY_SOURCE__"):
+                      "__TABFERRY_DUPES__", "__TABFERRY_ID__", "__TABFERRY_GENERATED__",
+                      "__TABFERRY_SOURCE__"):
             self.assertNotIn(token, html)
 
     def test_preloaded_state_is_embedded(self):

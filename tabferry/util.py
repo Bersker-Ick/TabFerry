@@ -8,7 +8,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, TypeVar
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 T = TypeVar("T")
 
@@ -58,16 +58,100 @@ def domain_of(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+#: Query parameters that identify a campaign/click, not a page.
+TRACKING_KEYS = {
+    "fbclid",
+    "gclid",
+    "yclid",
+    "mc_cid",
+    "mc_eid",
+    "igshid",
+    "mkt_tok",
+    "_ga",
+    "_gl",
+    "ref",
+    "ref_src",
+    "ref_url",
+    "spm",
+    "scm",
+    "share_source",
+    "share_medium",
+    "share_plat",
+    "share_tag",
+    "share_session_id",
+    "from_source",
+    "from_spmid",
+    "vd_source",
+}
+
+
+def normalize_url(url: str) -> str:
+    """Canonical key for duplicate detection.
+
+    Lowercases the scheme/host, drops ``www.``, default ports, fragments,
+    tracking parameters and a trailing slash, and sorts the remaining query
+    parameters. URLs that are not HTTP(S) only lose their fragment.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return raw.split("#", 1)[0]
+    if parts.scheme.lower() not in ("http", "https"):
+        return raw.split("#", 1)[0]
+
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if port and not (
+        (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+    ):
+        host = f"{host}:{port}"
+
+    path = parts.path or "/"
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+
+    pairs = []
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        lowered = key.lower()
+        if lowered.startswith("utm_") or lowered in TRACKING_KEYS:
+            continue
+        pairs.append((key, value))
+    pairs.sort()
+    query = urlencode(pairs, doseq=True)
+
+    return urlunsplit((scheme, host, path, query, ""))
+
+
+def dedupe_key(url: str, mode: str = "url") -> str:
+    """Key used to merge the same page opened more than once."""
+    if mode == "none":
+        return (url or "").strip()
+    if mode == "normalized":
+        return normalize_url(url)
+    return (url or "").split("#", 1)[0].strip()
+
+
 def stable_id(text: str, length: int = 10) -> str:
     """Short, stable hash used as the offline storage namespace."""
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:length]
 
 
-def dedupe_tabs(tabs: Iterable[T], key=None) -> List[T]:
-    """Drop later tabs that resolve to the same URL key, keeping order."""
+def dedupe_tabs(tabs: Iterable[T], key=None, mode: str = "url") -> List[T]:
+    """Drop later tabs that resolve to the same key, keeping order."""
+    if key is None and mode == "none":
+        return list(tabs)
     seen = set()
     out: List[T] = []
-    get_key = key or (lambda tab: dedupe_key(tab.url))
+    get_key = key or (lambda tab: dedupe_key(tab.url, mode))
     for tab in tabs:
         k = get_key(tab)
         if not k or k in seen:

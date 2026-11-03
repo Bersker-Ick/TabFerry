@@ -67,7 +67,8 @@ tabferry import --source chromium --browser edge
 tabferry import --source chromium --profile "C:\Users\me\AppData\Local\Google\Chrome\User Data\Default"
 tabferry import --source text --from urls.txt
 tabferry import --source json --from tabs.json
-tabferry import --keep-duplicates
+tabferry import --dedupe url                        # only ignore #fragment
+tabferry import --dedupe none                       # keep everything
 ```
 
 - **Firefox** — reads `sessionstore.jsonlz4` (and
@@ -80,7 +81,30 @@ tabferry import --keep-duplicates
 - **Text** — one URL per line, or `Title<TAB>URL`.
 - **JSON** — a TabFerry snapshot or an array of `{"url": "...", "title": "..."}`.
 
-Duplicate pages (same URL, different `#anchor`) are merged by default.
+By default duplicates are merged with the `normalized` strategy; see below.
+
+### Deduplication
+
+Import deduplicates by default. Strategies:
+
+| `--dedupe` | Merges |
+| --- | --- |
+| `normalized` (default) | the same page even with a `#fragment`, `utm_*` / `fbclid` / `gclid` / … tracking params, `www.`, default ports, a trailing slash, or the same query params in a different order |
+| `url` | the same URL ignoring only the `#fragment` |
+| `none` | nothing (`--keep-duplicates` is an alias) |
+
+To deduplicate an existing snapshot without re-importing:
+
+```bash
+tabferry dedupe --mode normalized
+```
+
+The snapshot records the mode and how many tabs were merged. The page shows
+`N duplicates merged` in the header, and `tabferry status` reports it.
+
+The page's **Dedupe** button (in the *Removed* drawer) applies the same
+normalized comparison to the current list; merged tabs move to *Removed* and can
+be restored individually.
 
 ### Serve
 
@@ -119,6 +143,7 @@ Data dir: /home/me/.local/share/tabferry
 Created:  2025-01-02T03:04:05+00:00
 Source:   chromium:edge
 Tabs:     128
+Dedupe:   normalized (12 merged)
 Removed:  3
 ```
 
@@ -229,6 +254,7 @@ tabferry/
   models.py       Tab, Snapshot
   snapshot.py     snapshot load/save
   state.py        removed-URL store (atomic JSON)
+  util.py         URL normalization, dedupe, atomic writes
   mozlz4.py       pure-Python mozLz40/LZ4 decompressor
   render.py       template + data -> single-file app
   server.py       HTTP server + JSON API
