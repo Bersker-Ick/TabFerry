@@ -6,6 +6,18 @@ on:
   pull_request:
 
 jobs:
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure no tab data is committed
+        run: |
+          if git ls-files | grep -E '(^|/)(tabs\.json|state\.json)$|^data/'; then
+            echo "::error::Tab data must never be committed"
+            exit 1
+          fi
+          echo "No tab data tracked."
+
   test:
     runs-on: ubuntu-latest
     strategy:
