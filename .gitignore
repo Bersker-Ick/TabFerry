@@ -16,6 +16,12 @@ tabs.json
 state.json
 *.log
 
+# Generated exports and local screenshots
+/tabferry.html
+/tabferry-*.html
+/preview*.png
+/tabferry-preview*.png
+
 # Editors / OS
 .DS_Store
 Thumbs.db

@@ -237,6 +237,10 @@ The server has **no authentication** and the state API is open to anyone who can
 reach the port. Run it on a trusted network, or put it behind an authenticated
 reverse proxy. The tab list is sensitive: it is everything you had open.
 
+Imported tabs live in the per-user data directory (or `--data-dir`). `data/`,
+`tabs.json`, `state.json` and generated exports/screenshots are in
+`.gitignore`; keep them out of the repository.
+
 ## Development
 
 ```bash
