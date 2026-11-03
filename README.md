@@ -1,5 +1,7 @@
 # TabFerry
 
+**English** | [中文](README.zh-CN.md)
+
 > Ferry your browser tabs to your phone — offline-ready, triageable, self-hosted.
 
 TabFerry reads the tabs you already have open in a desktop browser, builds a
@@ -9,16 +11,18 @@ copy and the list keeps working when the computer is off; the server stores
 removals so they survive restarts.
 
 ```
-Firefox session  ──import──▶  tabs.json  ──serve──▶  phone (search / open / remove)
-                                   │
-                                   └──export──▶  standalone HTML (offline)
+Browser session  ──import──▶  tabs.json  ──serve──▶  phone (search / open / remove)
+                                     │
+                                     └──export──▶  standalone HTML (offline)
 ```
 
 ## Features
 
-- **One-command import** — Firefox session store out of the box, plus plain
-  text and JSON for everything else.
+- **One-command import** — Firefox session stores and Chromium-family session
+  files (Chrome, Edge, Brave, Chromium), plus plain text and JSON.
 - **Mobile-first page** — search, tap a title to open, tap `×` to remove.
+- **English / 简体中文 UI** — picked from the browser language; override with
+  `?lang=zh` or `?lang=en`.
 - **Offline copy** — one self-contained HTML file, no server required.
 - **Durable state** — removals are written to `state.json` atomically.
 - **Zero runtime dependencies** — pure Python standard library.
@@ -29,8 +33,14 @@ Firefox session  ──import──▶  tabs.json  ──serve──▶  phone (
 
 ```bash
 pipx install git+https://github.com/Bersker-Ick/TabFerry.git
-tabferry import     # auto-detects your Firefox profile
+tabferry import     # auto-detects Firefox
 tabferry serve      # prints the LAN URL
+```
+
+For Chrome / Edge / Brave:
+
+```bash
+tabferry import --source chromium
 ```
 
 Open the printed URL on your phone (same Wi-Fi). Without pipx:
@@ -50,16 +60,23 @@ Python 3.9 or newer is required.
 ### Import
 
 ```bash
-tabferry import                                   # newest Firefox session
+tabferry import                                      # newest Firefox session
 tabferry import --profile ~/.mozilla/firefox/abc.default
+tabferry import --source chromium                   # newest Chrome/Edge/Brave
+tabferry import --source chromium --browser edge
+tabferry import --source chromium --profile "C:\Users\me\AppData\Local\Google\Chrome\User Data\Default"
 tabferry import --source text --from urls.txt
 tabferry import --source json --from tabs.json
 tabferry import --keep-duplicates
 ```
 
-- **Firefox** — reads `sessionstore.jsonlz4` (and the newer
+- **Firefox** — reads `sessionstore.jsonlz4` (and
   `sessionstore-backups/recovery.jsonlz4`), discovers profiles through
   `profiles.ini` on Windows, macOS, Linux, Flatpak and Snap.
+- **Chromium family** — reads `Sessions/Session_*` (SNSS journal) from Chrome,
+  Edge, Brave or Chromium. `--browser auto` picks the profile with the newest
+  session. If the browser is running it may hold the file exclusively; close it
+  or pass a copied `--profile` path.
 - **Text** — one URL per line, or `Title<TAB>URL`.
 - **JSON** — a TabFerry snapshot or an array of `{"url": "...", "title": "..."}`.
 
@@ -100,7 +117,7 @@ tabferry status
 ```
 Data dir: /home/me/.local/share/tabferry
 Created:  2025-01-02T03:04:05+00:00
-Source:   firefox
+Source:   chromium:edge
 Tabs:     128
 Removed:  3
 ```
@@ -138,7 +155,8 @@ embedded and removals live in the browser's `localStorage`.
 
 | Source | Flag | Notes |
 | --- | --- | --- |
-| Firefox | `--source firefox` | session store, profiles.ini discovery |
+| Firefox | `--source firefox` | session store, `profiles.ini` discovery |
+| Chromium family | `--source chromium` | Chrome, Edge, Brave, Chromium; SNSS `Session_*` |
 | Text | `--source text` | one URL per line, optional `Title<TAB>URL` |
 | JSON | `--source json` | snapshot or array of tabs |
 
@@ -146,6 +164,16 @@ To add a source, subclass `tabferry.sources.base.TabSource`, implement
 `load()`, and register the class in `tabferry/sources/__init__.py`. The
 `TabSource` contract is deliberately small so browser-specific code stays out
 of the core.
+
+### Chromium session notes
+
+Chromium writes an SNSS journal: `SNSS` magic, a version, then length-prefixed
+commands. TabFerry decodes `kCommandUpdateTabNavigation` (6) for
+`tab_id / index / url / title` and `kCommandSetSelectedNavigationIndex` (7) to
+pick the entry that is actually open. `Tabs_*` is the recently-closed list and
+is only used as a fallback. Because the browser can keep these files open
+exclusively on Windows, the importer reports a clear error instead of a
+traceback; close the browser or point `--profile` at a copied profile.
 
 ## Deployment
 
@@ -204,8 +232,8 @@ tabferry/
   mozlz4.py       pure-Python mozLz40/LZ4 decompressor
   render.py       template + data -> single-file app
   server.py       HTTP server + JSON API
-  sources/        firefox.py, text.py, json_source.py
-  templates/      app.html
+  sources/        chromium.py, firefox.py, text.py, json_source.py
+  templates/      app.html (English + 简体中文)
 tests/            unittest suite, no third-party deps
 docs/             architecture notes
 ```
@@ -215,10 +243,10 @@ extension points.
 
 ## Roadmap
 
-- Chromium/Edge open-tab adapter (SNSS parsing).
 - Optional access token for the HTTP API.
 - A sync endpoint so offline copies can reconcile automatically.
-- UI localisation (English today).
+- More UI languages.
+- Firefox/Chromium snapshot diffing.
 
 ## License
 

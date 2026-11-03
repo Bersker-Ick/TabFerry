@@ -41,6 +41,12 @@ class RenderTests(unittest.TestCase):
         html = render(snapshot)
         self.assertNotIn("</script></script>", html)
 
+    def test_bilingual_ui_strings_are_present(self):
+        html = render(sample_snapshot())
+        self.assertIn("Removed", html)
+        self.assertIn("已移除", html)
+        self.assertIn("离线副本", html)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,7 @@ from .models import Snapshot
 from .render import render
 from .server import App, urls_for
 from .snapshot import SnapshotError, load as load_snapshot, save as save_snapshot
-from .sources import SOURCES, SourceError, get_source, load_firefox
+from .sources import BROWSERS, SOURCES, SourceError, get_source, load_chromium, load_firefox
 from .state import StateStore
 from .util import dedupe_tabs, now_iso
 
@@ -31,7 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
     imp = sub.add_parser("import", help="import tabs into a snapshot")
     imp.add_argument("--source", choices=sorted(SOURCES), default="firefox",
                      help="where tabs come from (default: firefox)")
-    imp.add_argument("--profile", help="Firefox profile directory (default: auto-detect)")
+    imp.add_argument("--profile",
+                     help="browser profile directory or session file (default: auto-detect)")
+    imp.add_argument("--browser", choices=["auto"] + sorted(BROWSERS), default="auto",
+                     help="Chromium-family browser for --source chromium (default: auto)")
     imp.add_argument("--from", dest="from_path", metavar="PATH",
                      help="input file for --source text or json")
     imp.add_argument("--data-dir", help="data directory (default: per-user app data)")
@@ -68,6 +71,9 @@ def cmd_import(args: argparse.Namespace) -> int:
         if args.source == "firefox":
             tabs = load_firefox(args.profile)
             label = "firefox"
+        elif args.source == "chromium":
+            tabs = load_chromium(args.browser, args.profile)
+            label = f"chromium:{args.browser}"
         else:
             if not args.from_path:
                 print(f"error: --from is required for --source {args.source}", file=sys.stderr)
@@ -168,7 +174,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_sources(args: argparse.Namespace) -> int:
     for name in sorted(SOURCES):
-        print(f"{name:8s} {SOURCES[name].description}")
+        print(f"{name:9s} {SOURCES[name].description}")
     return 0
 
 

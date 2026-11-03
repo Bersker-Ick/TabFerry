@@ -21,7 +21,10 @@ TabFerry is a small pipeline: **import → snapshot → render → serve**.
 | `snapshot.py` | Load/save the imported tab list, with friendly errors. |
 | `state.py` | Thread-safe removed-URL set, atomic JSON writes. |
 | `mozlz4.py` | Decoder for Firefox's `mozLz40` LZ4 container. |
-| `sources/` | Import adapters. `firefox.py`, `text.py`, `json_source.py`. |
+| `sources/firefox.py` | Firefox session store and `profiles.ini` discovery. |
+| `sources/chromium.py` | SNSS parser for Chrome, Edge, Brave and Chromium. |
+| `sources/text.py` | One-URL-per-line importer. |
+| `sources/json_source.py` | Snapshot / tab-array importer. |
 | `render.py` | Injects the snapshot and preloaded state into `templates/app.html`. |
 | `server.py` | `ThreadingHTTPServer`, static page, JSON state API, `/download`. |
 | `cli.py` | `import`, `serve`, `export`, `status`, `sources`. |
@@ -53,6 +56,33 @@ TabFerry is a small pipeline: **import → snapshot → render → serve**.
 Both writes go through `util.atomic_write_text` (temp file, `fsync`, `replace`),
 so a crash mid-write cannot leave a half-written JSON document.
 
+## Chromium sessions (SNSS)
+
+Chromium keeps open tabs in `<profile>/Sessions/Session_<timestamp>`. The file
+is an SNSS journal:
+
+```
+"SNSS" | int32 version | command*
+command := uint16 size | uint8 id | (size - 1) bytes payload
+```
+
+TabFerry only needs two command types:
+
+| ID | Command | Payload |
+| --- | --- | --- |
+| 6 | `kCommandUpdateTabNavigation` | Pickle: `int32 tab_id`, `int32 index`, `string url`, `string16 title`, … |
+| 7 | `kCommandSetSelectedNavigationIndex` | raw `int32 tab_id`, `int32 index` |
+
+`string` is `uint32 byte_length + UTF-8 bytes`, padded to 4 bytes; `string16` is
+`uint32 char_count + UTF-16LE`, padded to 4. Command 6 carries a 4-byte Pickle
+length header before the fields. Commands 0/2/7/8 are raw 8-byte `int32` pairs.
+
+The importer collects every navigation per tab, then keeps the entry selected by
+command 7 (falling back to the highest index). `Tabs_*` is the recently-closed
+list and is only used when no `Session_*` exists. Browsers often hold these
+files exclusively on Windows, so `_read_session` turns `PermissionError` into a
+`SourceError` with an actionable message.
+
 ## Request flow
 
 1. `tabferry import` picks a source, normalises tabs, deduplicates by URL
@@ -67,8 +97,12 @@ so a crash mid-write cannot leave a half-written JSON document.
 
 ## Offline behaviour
 
-The page is a single HTML file with no external assets. When opened from
-`file://` (or when the API is unreachable), `init()` falls back to:
+The page is a single HTML file with no external assets. Labels come from a small
+`I18N` table (`navigator.language`, overridable with `?lang=zh|en`), so the UI
+works in English and Simplified Chinese without a build step.
+
+When opened from `file://` (or when the API is unreachable), `init()` falls back
+to:
 
 1. `PRELOADED` — state baked in at download time.
 2. `localStorage["tabferry:<data-id>:removed"]` — later changes on that device.

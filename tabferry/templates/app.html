@@ -98,12 +98,13 @@
       <h1>TabFerry</h1>
       <div class="sub">__TABFERRY_GENERATED__ · __TABFERRY_SOURCE__</div>
     </div>
-    <div class="counter"><b id="remain">__TABFERRY_TOTAL__</b><span>of __TABFERRY_TOTAL__</span></div>
+    <div class="counter"><b id="remain">__TABFERRY_TOTAL__</b><span id="counterSuffix"></span></div>
   </div>
   <div class="row2">
     <input id="q" type="search" placeholder="Search title or URL…" autocomplete="off"
            enterkeyhint="search">
-    <button id="openRemoved" class="btn" type="button">Removed <span id="removedCount">0</span></button>
+    <button id="openRemoved" class="btn" type="button"><span id="removedLabel">Removed</span>
+      <span id="removedCount">0</span></button>
   </div>
   <div id="sync" class="sync">
     <span id="syncText">Connecting…</span> ·
@@ -119,7 +120,7 @@
 <div id="mask" class="mask" hidden></div>
 <section id="drawer" class="drawer" hidden aria-label="Removed tabs">
   <div class="drawer-h">
-    <b>Removed <span id="drawerCount">0</span></b>
+    <b><span id="drawerLabel">Removed</span> <span id="drawerCount">0</span></b>
     <div>
       <button id="restoreAll" class="btn small" type="button">Restore all</button>
       <button id="closeDrawer" class="btn small" type="button">Close</button>
@@ -147,15 +148,99 @@
   var DATA_ID = '__TABFERRY_ID__';
   var TOTAL = DATA.length;
 
+  var LANG = (function(){
+    var requested = '';
+    try { requested = new URLSearchParams(location.search).get('lang') || ''; }
+    catch (e) { /* older browsers */ }
+    var value = (requested || navigator.language || 'en').toLowerCase();
+    return value.indexOf('zh') === 0 ? 'zh' : 'en';
+  })();
+
+  var I18N = {
+    en: {
+      search: 'Search title or URL…',
+      removed: 'Removed',
+      counter: 'of {n}',
+      saveOffline: 'Save offline copy',
+      connecting: 'Connecting…',
+      connected: 'Connected · changes save automatically',
+      offline: 'Offline · changes stay on this device',
+      offlineNoStore: 'Offline · this browser cannot store changes',
+      offlineCopy: 'Offline copy · changes stay on this device',
+      offlineCopyNoStore: 'Offline copy · this browser cannot store changes',
+      undo: 'Undo',
+      restoreAll: 'Restore all',
+      close: 'Close',
+      export: 'Export',
+      import: 'Import',
+      restore: 'Restore',
+      removeAria: 'Remove from list',
+      nothingRemoved: 'Nothing removed yet',
+      noMatches: 'No matches',
+      allTriaged: 'Everything is triaged. Removed tabs can be restored from the drawer.',
+      removedOne: 'Removed 1 tab',
+      restored: 'Restored',
+      allRestored: 'All restored',
+      exported: 'Exported {n} items',
+      imported: 'Imported {n} items',
+      badImport: 'That file is not a TabFerry export',
+      confirmRestore: 'Restore all {n} removed tabs?'
+    },
+    zh: {
+      search: '搜索标题或网址…',
+      removed: '已移除',
+      counter: '共 {n} 个',
+      saveOffline: '保存离线副本',
+      connecting: '正在连接…',
+      connected: '已连接 · 改动会自动保存',
+      offline: '离线 · 改动只保存在这台设备',
+      offlineNoStore: '离线 · 此浏览器无法保存改动',
+      offlineCopy: '离线副本 · 改动只保存在这台设备',
+      offlineCopyNoStore: '离线副本 · 此浏览器无法保存改动',
+      undo: '撤销',
+      restoreAll: '全部恢复',
+      close: '关闭',
+      export: '导出',
+      import: '导入',
+      restore: '恢复',
+      removeAria: '从列表移除',
+      nothingRemoved: '还没有移除任何标签页',
+      noMatches: '没有匹配的链接',
+      allTriaged: '全部处理完了，可在「已移除」里恢复',
+      removedOne: '已移除 1 个标签页',
+      restored: '已恢复',
+      allRestored: '已全部恢复',
+      exported: '已导出 {n} 条',
+      imported: '已导入 {n} 条',
+      badImport: '这个文件不是 TabFerry 导出的',
+      confirmRestore: '恢复全部 {n} 个已移除的标签页？'
+    }
+  };
+
+  function t(key, vars){
+    var table = I18N[LANG] || I18N.en;
+    var text = table[key] != null ? table[key] : I18N.en[key];
+    if (text == null) return key;
+    if (vars){
+      Object.keys(vars).forEach(function(name){
+        text = text.replace('{' + name + '}', String(vars[name]));
+      });
+    }
+    return text;
+  }
+
   var $ = function(selector){ return document.querySelector(selector); };
   var listEl = $('#list');
   var qEl = $('#q');
   var remainEl = $('#remain');
   var removedCountEl = $('#removedCount');
+  var removedLabelEl = $('#removedLabel');
   var drawerEl = $('#drawer');
   var maskEl = $('#mask');
   var drawerListEl = $('#drawerList');
   var drawerCountEl = $('#drawerCount');
+  var drawerLabelEl = $('#drawerLabel');
+  var counterSuffixEl = $('#counterSuffix');
   var toastEl = $('#toast');
   var toastTextEl = $('#toastText');
   var undoEl = $('#undo');
@@ -199,6 +284,22 @@
     syncEl.className = 'sync' + (cls ? ' ' + cls : '');
   }
 
+  function applyLanguage(){
+    document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+    qEl.placeholder = t('search');
+    removedLabelEl.textContent = t('removed');
+    drawerLabelEl.textContent = t('removed');
+    $('#restoreAll').textContent = t('restoreAll');
+    $('#closeDrawer').textContent = t('close');
+    $('#exportBtn').textContent = t('export');
+    $('#importBtn').textContent = t('import');
+    undoEl.textContent = t('undo');
+    downloadLink.textContent = t('saveOffline');
+    counterSuffixEl.textContent = t('counter', {n: TOTAL});
+    syncTextEl.textContent = t('connecting');
+    drawerEl.setAttribute('aria-label', t('removed'));
+  }
+
   function build(){
     var fragment = document.createDocumentFragment();
     for (var i = 0; i < DATA.length; i++){
@@ -233,7 +334,7 @@
       var remove = document.createElement('button');
       remove.className = 'rm';
       remove.type = 'button';
-      remove.setAttribute('aria-label', 'Remove from list');
+      remove.setAttribute('aria-label', t('removeAria'));
       remove.textContent = '\u00d7';
       remove.addEventListener('click', (function(u){
         return function(event){
@@ -265,10 +366,10 @@
     remainEl.textContent = String(Math.max(0, TOTAL - removed.size));
     if (shown === 0){
       if (TOTAL - removed.size === 0){
-        emptyEl.textContent = 'Everything is triaged. Removed tabs can be restored from the drawer.';
+        emptyEl.textContent = t('allTriaged');
         emptyEl.hidden = false;
       } else if (value !== ''){
-        emptyEl.textContent = 'No matches';
+        emptyEl.textContent = t('noMatches');
         emptyEl.hidden = false;
       } else {
         emptyEl.hidden = true;
@@ -295,7 +396,7 @@
       if (!response.ok) throw new Error('http ' + response.status);
     }).catch(function(){
       offline = true;
-      setSync('Offline · changes stay on this device', 'warn');
+      setSync(t('offline'), 'warn');
     });
   }
 
@@ -322,7 +423,7 @@
     updateCounts();
     renderDrawer();
     push('remove', url);
-    toast('Removed 1 tab', true);
+    toast(t('removedOne'), true);
   }
 
   function restoreUrl(url){
@@ -333,7 +434,7 @@
     renderDrawer();
     push('restore', url);
     syncVisibility();
-    toast('Restored', false);
+    toast(t('restored'), false);
   }
 
   function renderDrawer(){
@@ -359,7 +460,7 @@
         var button = document.createElement('button');
         button.className = 'btn small';
         button.type = 'button';
-        button.textContent = 'Restore';
+        button.textContent = t('restore');
         button.addEventListener('click', function(){ restoreUrl(url); });
 
         row.appendChild(meta);
@@ -370,7 +471,7 @@
     if (!items.length){
       var empty = document.createElement('div');
       empty.className = 'empty';
-      empty.textContent = 'Nothing removed yet';
+      empty.textContent = t('nothingRemoved');
       drawerListEl.appendChild(empty);
     }
     drawerCountEl.textContent = String(items.length);
@@ -409,7 +510,7 @@
     if (navigator.clipboard && navigator.clipboard.writeText){
       navigator.clipboard.writeText(payload).catch(function(){});
     }
-    toast('Exported ' + removed.size + ' items', false);
+    toast(t('exported', {n: removed.size}), false);
   }
 
   function importState(file){
@@ -429,9 +530,9 @@
         updateCounts();
         renderDrawer();
         syncVisibility();
-        toast('Imported ' + added + ' items', false);
+        toast(t('imported', {n: added}), false);
       } catch (e) {
-        toast('That file is not a TabFerry export', false);
+        toast(t('badImport'), false);
       }
     };
     reader.readAsText(file);
@@ -447,14 +548,14 @@
   });
   $('#restoreAll').addEventListener('click', function(){
     if (!removed.size) return;
-    if (!confirm('Restore all ' + removed.size + ' removed tabs?')) return;
+    if (!confirm(t('confirmRestore', {n: removed.size}))) return;
     removed.clear();
     push('restore_all', '');
     updateCounts();
     renderDrawer();
     syncVisibility();
     closeDrawer();
-    toast('All restored', false);
+    toast(t('allRestored'), false);
   });
   $('#exportBtn').addEventListener('click', exportState);
   $('#importBtn').addEventListener('click', function(){ $('#importFile').click(); });
@@ -464,21 +565,24 @@
     this.value = '';
   });
 
-  function goOffline(){
+  function goOffline(isFileCopy){
     offline = true;
     removed = new Set(PRELOADED.concat(Array.from(lsLoad())));
+    var key;
     if (storageOK()){
-      setSync('Offline · changes stay on this device', 'warn');
+      key = isFileCopy ? 'offlineCopy' : 'offline';
     } else {
-      setSync('Offline · this browser cannot store changes', 'warn');
+      key = isFileCopy ? 'offlineCopyNoStore' : 'offlineNoStore';
     }
+    setSync(t(key), 'warn');
     if (downloadLink) downloadLink.hidden = true;
   }
 
   async function init(){
+    applyLanguage();
     build();
     if (location.protocol === 'file:'){
-      goOffline();
+      goOffline(true);
     } else {
       try {
         var response = await fetch('api/state', {cache: 'no-store'});
@@ -493,9 +597,9 @@
           }
         });
         lsSave();
-        setSync('Connected · changes save automatically', 'ok');
+        setSync(t('connected'), 'ok');
       } catch (e) {
-        goOffline();
+        goOffline(false);
       }
     }
     updateCounts();
